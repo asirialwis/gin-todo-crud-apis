@@ -18,6 +18,7 @@ type User struct {
 	// User fields
 	Username string `json:"username" gorm:"unique;not null" example:"user_alice"`     // Must be unique
 	Email    string `json:"email" gorm:"unique;not null" example:"alice@example.com"` // Must be unique
+	Password string `json:"-"`                                                        // Ignored in JSON output for security
 
 	// Relationship: List of associated Todo items
 	Todos []Todo `json:"todos"` // The 'json:"todos"' tag allows the list of todos to be included in the response.

@@ -37,6 +37,7 @@ func CreateUser(c *gin.Context) {
 // @tags Users
 // @Produce  json
 // @Success 200 {array} models.User
+// @Security ApiKeyAuth
 // @Router /users [get] // <-- CORRECT: /users [get] for ALL users
 func FindUsers(c *gin.Context) {
 	var users []models.User
@@ -55,6 +56,7 @@ func FindUsers(c *gin.Context) {
 // @Param id path int true "User ID"
 // @Success 200 {object} models.User
 // @Failure 404 {object} map[string]interface{} "User not found"
+// @Security ApiKeyAuth
 // @Router /users/{id} [get] // <-- CORRECT: /users/{id} [get] for ONE user
 func FindUser(c *gin.Context) {
 	var user models.User
@@ -79,6 +81,7 @@ func FindUser(c *gin.Context) {
 // @Success 200 {object} models.User
 // @Failure 400 {object} map[string]interface{} "Invalid input format"
 // @Failure 404 {object} map[string]interface{} "User not found"
+// @Security ApiKeyAuth
 // @Router /users/{id} [patch] // <-- CORRECT: /users/{id} [patch] for UPDATE
 func UpdateUser(c *gin.Context) {
 	var user models.User
@@ -109,6 +112,7 @@ func UpdateUser(c *gin.Context) {
 // @Param id path int true "User ID"
 // @Success 200 {object} map[string]interface{} "Deletion successful" // <-- FIXED gin.H here
 // @Failure 404 {object} map[string]interface{} "User not found" // <-- FIXED gin.H here
+// @Security ApiKeyAuth
 // @Router /users/{id} [delete] // <-- CORRECT: /users/{id} [delete] for DELETE
 func DeleteUser(c *gin.Context) {
 	var user models.User

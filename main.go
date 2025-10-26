@@ -3,6 +3,7 @@ package main
 import (
 	"gin-demo-api/db"
 	"gin-demo-api/handlers"
+	"gin-demo-api/middleware"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,6 +22,12 @@ import (
 // @host localhost:8080
 // @BasePath /
 
+// --- JWT Security Definitions ---
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token. Example: "Bearer <token>"
+
 func main() {
 	// 1. Initialize DB connection and run migrations
 	db.ConnectDatabase()
@@ -30,19 +37,29 @@ func main() {
 
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// --- USER ROUTES ---
-	router.POST("/users", handlers.CreateUser)       // C: Create User
-	router.GET("/users", handlers.FindUsers)         // R: Read All Users (with Todos)
-	router.GET("/users/:id", handlers.FindUser)      // R: Read One User (with Todos)
-	router.PATCH("/users/:id", handlers.UpdateUser)  // U: Update User
-	router.DELETE("/users/:id", handlers.DeleteUser) // D: Delete User
+	// --- Public Routes (Auth) ---
+	router.POST("/register", handlers.RegisterUser) // Create a new user
+	router.POST("/login", handlers.LoginUser)       // Log in and get JWT token
 
-	// 3. Define RESTful API routes (CRUD)
-	router.POST("/todos", handlers.CreateTodo)       // C: Create
-	router.GET("/todos", handlers.FindTodos)         // R: Read All
-	router.GET("/todos/:id", handlers.FindTodo)      // R: Read One
-	router.PATCH("/todos/:id", handlers.UpdateTodo)  // U: Update
-	router.DELETE("/todos/:id", handlers.DeleteTodo) // D: Delete
+	// --- Protected Routes (Todos) ---
+	todos := router.Group("/todos")
+	todos.Use(middleware.RequireAuth) // Apply JWT middleware to all Todo routes
+	{
+		todos.POST("/", handlers.CreateTodo)
+		todos.GET("/", handlers.FindTodos)
+		todos.GET("/:id", handlers.FindTodo)
+		todos.PATCH("/:id", handlers.UpdateTodo)
+		todos.DELETE("/:id", handlers.DeleteTodo)
+	}
+
+	// --- User Routes (Protected) ---
+	// Note: User CRUD endpoints now rely on the authenticated user and token
+	users := router.Group("/users")
+	users.Use(middleware.RequireAuth) // Apply JWT middleware to User routes
+	{
+		// Placeholder for user specific operations, usually these would be 'Me' endpoints
+		// Example: users.GET("/me", handlers.GetUserProfile)
+	}
 
 	// 4. Start the server
 	router.Run("localhost:8080")

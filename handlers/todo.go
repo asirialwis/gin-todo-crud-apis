@@ -8,6 +8,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// TodoRequestBody defines the request body for creating/updating a todo.
+type TodoRequestBody struct {
+	Item      string `json:"item" example:"Finish project report"`
+	Completed *bool  `json:"completed" example:"false"` // Pointer to distinguish between false and not sent
+}
+
+// getAuthenticatedUserID retrieves the user ID from the Gin context, set by the RequireAuth middleware.
+func getAuthenticatedUserID(c *gin.Context) (uint, bool) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication context missing"})
+		return 0, false
+	}
+	userID, ok := userIDVal.(uint)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID in context"})
+		return 0, false
+	}
+	return userID, true
+}
+
 // --- C R E A T E (POST /todos) ------------------------------------------------
 // @Summary Create a new todo item
 // @Description Creates a new todo item and links it to a user via user_id.
@@ -17,25 +38,36 @@ import (
 // @Param todo body models.Todo true "Todo item data (requires user_id)"
 // @Success 201 {object} models.Todo
 // @Failure 400 {object} map[string]interface{} "Invalid input format or invalid User ID"
+// @Security ApiKeyAuth
 // @Router /todos [post]
 func CreateTodo(c *gin.Context) {
-	var input models.Todo
-	if err := c.ShouldBindJSON(&input); err != nil {
+
+	userID, ok := getAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	var body TodoRequestBody
+	if err := c.BindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Validate UserID exists before creating todo
-	var user models.User
-	if err := db.DB.First(&user, input.UserID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid User ID"})
+	// Default completed to false if not provided
+	completed := false
+	if body.Completed != nil {
+		completed = *body.Completed
+	}
+
+	todo := models.Todo{Item: body.Item, Completed: completed, UserID: userID}
+	result := db.DB.Create(&todo)
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create todo"})
 		return
 	}
 
-	// Save the new Todo record to the database
-	db.DB.Create(&input)
-
-	c.JSON(http.StatusCreated, input)
+	c.JSON(http.StatusCreated, todo)
 }
 
 // --- R E A D A L L (GET /todos) ---------------------------------------------
@@ -44,12 +76,19 @@ func CreateTodo(c *gin.Context) {
 // @tags Todos
 // @Produce  json
 // @Success 200 {array} models.Todo
+// @Security ApiKeyAuth
 // @Router /todos [get]
 func FindTodos(c *gin.Context) {
+
+	userID, ok := getAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
 	var todos []models.Todo
 
 	// Find all Todo records
-	db.DB.Find(&todos)
+	db.DB.Where("user_id = ?", userID).Find(&todos)
 
 	c.JSON(http.StatusOK, todos)
 }
@@ -62,13 +101,23 @@ func FindTodos(c *gin.Context) {
 // @Param id path int true "Todo ID"
 // @Success 200 {object} models.Todo
 // @Failure 404 {object} map[string]interface{} "Todo not found"
+// @Security ApiKeyAuth
 // @Router /todos/{id} [get]
 func FindTodo(c *gin.Context) {
+
+	userID, ok := getAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	id := c.Param("id")
 	var todo models.Todo
 
-	// Find record by ID (from URL parameter)
-	if err := db.DB.Where("id = ?", c.Param("id")).First(&todo).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+	// Find todo by ID and check ownership
+	result := db.DB.First(&todo, "id = ? AND user_id = ?", id, userID)
+
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found or access denied"})
 		return
 	}
 
@@ -86,25 +135,38 @@ func FindTodo(c *gin.Context) {
 // @Success 200 {object} models.Todo
 // @Failure 400 {object} map[string]interface{} "Invalid input format"
 // @Failure 404 {object} map[string]interface{} "Todo not found"
+// @Security ApiKeyAuth
 // @Router /todos/{id} [patch]
 func UpdateTodo(c *gin.Context) {
-	var todo models.Todo
-	// Check if todo exists
-	if err := db.DB.Where("id = ?", c.Param("id")).First(&todo).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+
+	userID, ok := getAuthenticatedUserID(c)
+	if !ok {
 		return
 	}
-
-	var input models.Todo
-	// Validate input JSON
-	if err := c.ShouldBindJSON(&input); err != nil {
+	id := c.Param("id")
+	var body TodoRequestBody
+	if err := c.BindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Update the record with the new input data
-	db.DB.Model(&todo).Updates(input)
+	var todo models.Todo
+	// Find todo by ID and check ownership
+	result := db.DB.First(&todo, "id = ? AND user_id = ?", id, userID)
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found or access denied"})
+		return
+	}
 
+	// Apply updates. Item check prevents updating to an empty string.
+	if body.Item != "" {
+		todo.Item = body.Item
+	}
+	if body.Completed != nil {
+		todo.Completed = *body.Completed
+	}
+
+	db.DB.Save(&todo)
 	c.JSON(http.StatusOK, todo)
 }
 
@@ -116,17 +178,24 @@ func UpdateTodo(c *gin.Context) {
 // @Param id path int true "Todo ID"
 // @Success 200 {object} map[string]interface{} "Deletion successful"
 // @Failure 404 {object} map[string]interface{} "Todo not found"
+// @Security ApiKeyAuth
 // @Router /todos/{id} [delete]
 func DeleteTodo(c *gin.Context) {
+	userID, ok := getAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+	id := c.Param("id")
 	var todo models.Todo
-	// Check if todo exists
-	if err := db.DB.Where("id = ?", c.Param("id")).First(&todo).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+
+	// Find todo by ID and check ownership before deleting
+	result := db.DB.First(&todo, "id = ? AND user_id = ?", id, userID)
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found or access denied"})
 		return
 	}
 
-	// Soft delete the record
+	// Use Soft Delete feature of GORM
 	db.DB.Delete(&todo)
-
-	c.JSON(http.StatusOK, gin.H{"data": true})
+	c.Status(http.StatusNoContent)
 }
